@@ -6,6 +6,7 @@ from colorama import Fore, Style, init
 from dotenv import load_dotenv
 import google.generativeai as genai
 import ollama
+import re # Importar el módulo re para expresiones regulares
 import time
 
 # Inicializar colorama
@@ -343,7 +344,7 @@ def main():
                     input("[PULSA INTRO PARA CONTINUAR]")
                     
                     # Comparar solución
-                    if solution_attempt.replace("SOLUCIÓN:", "").strip().lower() == solution.lower():
+                    if compare_solutions_flexible(solution_attempt.replace("SOLUCIÓN:", "").strip(), solution):
                         print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
                         break
                     else:
@@ -365,6 +366,33 @@ def main():
 
     except Exception as e:
         print_color(get_bubble_ascii(f"Ocurrió un error durante el juego: {e}", "Sistema", Fore.RED), Fore.RED)
+
+def compare_solutions_flexible(detective_solution, actual_solution, threshold=0.6):
+    """
+    Compara la solución del detective con la solución real de forma flexible.
+    Retorna True si un porcentaje de palabras clave de la solución real están presentes
+    en la solución del detective.
+    """
+    # Limpiar y tokenizar las soluciones
+    def clean_and_tokenize(text):
+        text = text.lower()
+        # Eliminar puntuación y dividir en palabras
+        words = re.findall(r'\b\w+\b', text)
+        # Filtrar palabras comunes (stop words) si es necesario, para este caso simple no lo haré
+        return set(words)
+
+    detective_words = clean_and_tokenize(detective_solution)
+    actual_words = clean_and_tokenize(actual_solution)
+
+    # Calcular la intersección de palabras
+    common_words = detective_words.intersection(actual_words)
+
+    # Calcular el porcentaje de palabras clave de la solución real que están en la solución del detective
+    if not actual_words:
+        return True # Si la solución real está vacía, cualquier cosa es correcta (caso borde)
+
+    match_percentage = len(common_words) / len(actual_words)
+    return match_percentage >= threshold
 
 if __name__ == "__main__":
     main()
