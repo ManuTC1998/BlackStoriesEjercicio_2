@@ -150,14 +150,14 @@ def main():
         3.  Estrategia: Solo puedes formular preguntas de respuesta cerrada (Sí/No).
         4.  Razonamiento Interno: Antes de cada pregunta, realiza un paso de 'Razonamiento' interno. Este razonamiento NO se muestra en la terminal.
             Debe guiar la evaluación de tu hipótesis actual y la formulación de la siguiente pregunta para mejorar la calidad de tus deducciones.
-            Formato de salida para la pregunta:
+            Formato de salida para la pregunta (CRÍTICO: DEBE incluir "PREGUNTA"):
             ```json
             {
                 "RAZONAMIENTO": "[Tu razonamiento interno aquí, NO VISIBLE EN TERMINAL]",
-                "PREGUNTA": "[Tu pregunta de Sí/No aquí]"
+                "PREGUNTA": "[Tu pregunta de Sí/No aquí, SIEMPRE presente y no vacía]"
             }
             ```
-            Asegúrate de que tu respuesta contenga ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre.
+            Asegúrate de que tu respuesta contenga ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre. La clave "PREGUNTA" es obligatoria y no puede estar vacía.
         5.  Intento de Resolución: Cuando se te indique, intenta una solución. Este intento DEBE comenzar con la palabra clave: 'SOLUCIÓN:'.
         6.  No uses emojis ni texto que no sea Castellano (excepto términos técnicos).
         7.  No uses usted.
@@ -226,23 +226,30 @@ def main():
 
             detective_response = detective_model.generate(detective_prompt)
             
-            # Extraer el bloque de código JSON del Markdown
-            json_block_start = detective_response.find("```json")
-            json_block_end = detective_response.rfind("```")
-
             reasoning = ""
             question = ""
 
-            if json_block_start != -1 and json_block_end != -1 and json_block_start < json_block_end:
-                json_content = detective_response[json_block_start + len("```json"):json_block_end].strip()
-                
-                import json
-                try:
-                    parsed_response = json.loads(json_content)
-                    reasoning = parsed_response.get("RAZONAMIENTO", "").strip()
-                    question = parsed_response.get("PREGUNTA", "").strip()
-                except json.JSONDecodeError:
-                    print_color(get_bubble_ascii("El Detective no generó un JSON válido dentro del bloque de código Markdown. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
+            import json
+            try:
+                # Intentar cargar la respuesta directamente como JSON
+                parsed_response = json.loads(detective_response)
+                reasoning = parsed_response.get("RAZONAMIENTO", "").strip()
+                question = parsed_response.get("PREGUNTA", "").strip()
+            except json.JSONDecodeError:
+                # Si falla, intentar extraer de un bloque de código Markdown (para compatibilidad)
+                json_block_start = detective_response.find("```json")
+                json_block_end = detective_response.rfind("```")
+                if json_block_start != -1 and json_block_end != -1 and json_block_start < json_block_end:
+                    json_content = detective_response[json_block_start + len("```json"):json_block_end].strip()
+                    try:
+                        parsed_response = json.loads(json_content)
+                        reasoning = parsed_response.get("RAZONAMIENTO", "").strip()
+                        question = parsed_response.get("PREGUNTA", "").strip()
+                    except json.JSONDecodeError:
+                        print_color(get_bubble_ascii("El Detective no generó un JSON válido ni directamente ni dentro de un bloque de código Markdown. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
+                        break
+                else:
+                    print_color(get_bubble_ascii("El Detective no generó un JSON válido. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
                     break
             
             if not question:
