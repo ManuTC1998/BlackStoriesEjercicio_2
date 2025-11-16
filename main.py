@@ -162,7 +162,26 @@ def main():
             }
             ```
             Asegúrate de que tu respuesta contenga el razonamiento y ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre adicional. La clave "PREGUNTA" es obligatoria y no puede estar vacía.
-        5.  Intento de Resolución: Cuando se te indique, intenta una solución. Este intento DEBE comenzar con la palabra clave: 'SOLUCIÓN:'.
+        5.  Formato de Salida Flexible: En cada turno, puedes elegir entre hacer una pregunta o intentar resolver el misterio.
+            Tu respuesta DEBE ser un bloque de código JSON con una de las siguientes claves:
+            -   "PREGUNTA": "[Tu pregunta de Sí/No aquí]" (Si quieres hacer una pregunta)
+            -   "SOLUCION": "[Tu intento de solución aquí]" (Si quieres intentar resolver el misterio)
+            
+            Ejemplo de pregunta:
+            RAZONAMIENTO: [Tu razonamiento interno aquí]
+            ```json
+            {
+                "PREGUNTA": "¿El culpable es un hombre?"
+            }
+            ```
+            Ejemplo de solución:
+            RAZONAMIENTO: [Tu razonamiento interno aquí]
+            ```json
+            {
+                "SOLUCION": "La víctima murió por envenenamiento."
+            }
+            ```
+            Asegúrate de que tu respuesta contenga el razonamiento y ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre adicional. La clave elegida ("PREGUNTA" o "SOLUCION") es obligatoria y no puede estar vacía.
         6.  No uses emojis ni texto que no sea Castellano (excepto términos técnicos).
         7.  No uses usted.
         8.  No uses español neutro o latino americano.
@@ -243,35 +262,39 @@ def main():
             turn_count += 1
             print_color(f"\n--- Turno {turn_count} ---", Fore.CYAN)
 
-            # Detective formula una pregunta
+            if turn_count > 10:
+                print_color(get_bubble_ascii(f"Se ha alcanzado el límite de 10 turnos. El Detective no ha resuelto el misterio. La solución era: {solution}", "Sistema", Fore.MAGENTA), Fore.MAGENTA)
+                break
+
+            # Detective formula una pregunta o intenta una solución
             detective_prompt = DETECTIVE_SYSTEM_PROMPT + f"\n\nHistoria: {story_short}\n"
             if conversation_history:
-                detective_prompt += "Preguntas anteriores y respuestas:\n" + "\n".join(conversation_history)
-            detective_prompt += "\nFormula tu siguiente pregunta de Sí/No."
+                detective_prompt += "Historial de conversación:\n" + "\n".join(conversation_history)
+            detective_prompt += f"\nTurno actual: {turn_count}. Tienes hasta el turno 10 para resolver el misterio. ¿Qué quieres hacer?"
 
             if detective_model.name == "gemma3:270m":
-                print_color(get_bubble_ascii("Advertencia: El modelo 'gemma3:270m' es muy pequeño y puede tener dificultades para generar preguntas en el formato JSON requerido. Se recomienda usar un modelo más grande.", "Sistema", Fore.YELLOW), Fore.YELLOW)
+                print_color(get_bubble_ascii("Advertencia: El modelo 'gemma3:270m' es muy pequeño y puede tener dificultades para generar preguntas/soluciones en el formato JSON requerido. Se recomienda usar un modelo más grande.", "Sistema", Fore.YELLOW), Fore.YELLOW)
                 input("[PULSA INTRO PARA CONTINUAR]")
 
             detective_response = detective_model.generate(detective_prompt)
             
             reasoning = ""
             question = ""
-            parsed_question_json = None
+            solution_attempt_text = ""
+            parsed_detective_json = None
             error_message = ""
 
-            # Primero, intentar extraer el bloque JSON de la pregunta
+            # Extraer el bloque JSON
             json_block_start = detective_response.find("```json")
             json_block_end = detective_response.rfind("```")
             
             json_content_to_parse = ""
-            reasoning_end_index = len(detective_response) # Por defecto, si no hay bloque JSON
+            reasoning_end_index = len(detective_response)
 
             if json_block_start != -1 and json_block_end != -1 and json_block_start < json_block_end:
                 json_content_to_parse = detective_response[json_block_start + len("```json"):json_block_end].strip()
                 reasoning_end_index = json_block_start
             else:
-                # Si no se encontró un bloque Markdown completo, intentar extraer buscando { y }
                 json_start = detective_response.find("{")
                 json_end = detective_response.rfind("}")
 
@@ -279,19 +302,18 @@ def main():
                     json_content_to_parse = detective_response[json_start : json_end + 1].strip()
                     reasoning_end_index = json_start
                 else:
-                    error_message = "No se encontró un bloque JSON de pregunta válido. "
+                    error_message = "No se encontró un bloque JSON válido en la respuesta del Detective. "
             
             try:
                 if json_content_to_parse:
-                    parsed_question_json = json.loads(json_content_to_parse)
-                    question = parsed_question_json.get("PREGUNTA", "").strip()
+                    parsed_detective_json = json.loads(json_content_to_parse)
+                    question = parsed_detective_json.get("PREGUNTA", "").strip()
+                    solution_attempt_text = parsed_detective_json.get("SOLUCION", "").strip()
                 else:
-                    parsed_question_json = None
-                    question = ""
+                    parsed_detective_json = None
             except json.JSONDecodeError as e:
                 error_message += f"Error al parsear JSON: {e}. Contenido: '{json_content_to_parse}'"
-                parsed_question_json = None
-                question = ""
+                parsed_detective_json = None
 
             # Extraer el razonamiento de la parte anterior al bloque JSON
             reasoning_start_tag = "RAZONAMIENTO:"
@@ -301,68 +323,50 @@ def main():
             if reasoning_start_index != -1:
                 reasoning = reasoning_text_potential[reasoning_start_index + len(reasoning_start_tag):].strip()
             else:
-                reasoning = "No se encontró el razonamiento explícito." # O dejarlo vacío si se prefiere
+                reasoning = "No se encontró el razonamiento explícito."
 
-            if not question:
-                full_error_output = f"{error_message}Respuesta completa del Detective: {detective_response}"
-                print_color(get_bubble_ascii(f"El Detective no formuló una pregunta válida o el formato JSON es incorrecto. {full_error_output}", "Sistema", Fore.RED), Fore.RED)
-                break
-            
-            # Opcional: Imprimir el razonamiento para depuración, pero no en el bocadillo de la pregunta
+            # Opcional: Imprimir el razonamiento para depuración
             # print_color(f"Razonamiento del Detective (interno): {reasoning}", Fore.BLUE)
 
-            print_color(get_bubble_ascii(question, f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
-            input("[PULSA INTRO PARA CONTINUAR]")
+            if question:
+                print_color(get_bubble_ascii(question, f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
+                input("[PULSA INTRO PARA CONTINUAR]")
 
-            # Juez responde a la pregunta
-            judge_answer_prompt = JUDGE_SYSTEM_PROMPT + f"\n\nHistoria: {story_short}\nSolución: {solution}\nPregunta del Detective: {question}\n\nResponde estrictamente con 'Sí', 'No' o 'Irrelevante'."
-            judge_answer = juez_model.generate(judge_answer_prompt).strip()
+                # Juez responde a la pregunta
+                judge_answer_prompt = JUDGE_SYSTEM_PROMPT + f"\n\nHistoria: {story_short}\nSolución: {solution}\nPregunta del Detective: {question}\n\nResponde estrictamente con 'Sí', 'No' o 'Irrelevante'."
+                judge_answer = juez_model.generate(judge_answer_prompt).strip()
 
-            if judge_answer not in ["Sí", "No", "Irrelevante"]:
-                print_color(get_bubble_ascii(f"El Juez dio una respuesta inválida: '{judge_answer}'. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
-                break
+                if judge_answer not in ["Sí", "No", "Irrelevante"]:
+                    print_color(get_bubble_ascii(f"El Juez dio una respuesta inválida: '{judge_answer}'. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
+                    break
 
-            print_color(get_bubble_ascii(judge_answer, f"Juez ({juez_model.name})", Fore.GREEN), Fore.GREEN)
-            input("[PULSA INTRO PARA CONTINUAR]")
+                print_color(get_bubble_ascii(judge_answer, f"Juez ({juez_model.name})", Fore.GREEN), Fore.GREEN)
+                input("[PULSA INTRO PARA CONTINUAR]")
 
-            # Añadir al historial de conversación
-            conversation_history.append(f"Detective: {question}")
-            conversation_history.append(f"Juez: {judge_answer}")
+                # Añadir al historial de conversación
+                conversation_history.append(f"Detective: {question}")
+                conversation_history.append(f"Juez: {judge_answer}")
 
-            # Intento de solución del Detective en turnos específicos
-            if turn_count == 5 or turn_count == 10:
-                print_color(get_bubble_ascii("Detective, es hora de intentar una solución.", "Sistema", Fore.CYAN), Fore.CYAN)
-                detective_solution_prompt = DETECTIVE_SYSTEM_PROMPT + f"\n\nHistoria: {story_short}\n"
-                if conversation_history:
-                    detective_solution_prompt += "Preguntas y respuestas anteriores:\n" + "\n".join(conversation_history)
-                detective_solution_prompt += "\nIntenta resolver el misterio. Comienza tu respuesta con 'SOLUCIÓN:'."
+            elif solution_attempt_text:
+                print_color(get_bubble_ascii(f"Intento de solución: {solution_attempt_text}", f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
+                input("[PULSA INTRO PARA CONTINUAR]")
                 
-                solution_attempt = detective_model.generate(detective_solution_prompt).strip()
-                
-                if solution_attempt.startswith("SOLUCIÓN:"):
-                    print_color(get_bubble_ascii(solution_attempt, f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
-                    input("[PULSA INTRO PARA CONTINUAR]")
-                    
-                    # Comparar solución
-                    if compare_solutions_flexible(solution_attempt.replace("SOLUCIÓN:", "").strip(), solution):
-                        print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
-                        break
-                    else:
-                        print_color(get_bubble_ascii("El Detective no ha acertado la solución.", "Sistema", Fore.YELLOW), Fore.YELLOW)
-                        if turn_count == 10:
-                            print_color(get_bubble_ascii(f"El Detective no acertó en el turno 10. Fin de la partida. La solución era: {solution}", "Sistema", Fore.RED), Fore.RED)
-                            break
-                        else:
-                            print_color(get_bubble_ascii("Continúa el juego.", "Sistema", Fore.YELLOW), Fore.YELLOW)
-                            input("[PULSA INTRO PARA CONTINUAR]")
+                # Comparar solución
+                if compare_solutions_flexible(solution_attempt_text, solution):
+                    print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
+                    break
                 else:
-                    print_color(get_bubble_ascii("El Detective no formuló la solución correctamente.", "Sistema", Fore.YELLOW), Fore.YELLOW)
+                    print_color(get_bubble_ascii("El Detective no ha acertado la solución.", "Sistema", Fore.YELLOW), Fore.YELLOW)
                     if turn_count == 10:
-                        print_color(get_bubble_ascii(f"El Detective no formuló la solución correctamente en el turno 10. Fin de la partida. La solución era: {solution}", "Sistema", Fore.RED), Fore.RED)
+                        print_color(get_bubble_ascii(f"El Detective no acertó en el turno 10. Fin de la partida. La solución era: {solution}", "Sistema", Fore.MAGENTA), Fore.MAGENTA)
                         break
                     else:
                         print_color(get_bubble_ascii("Continúa el juego.", "Sistema", Fore.YELLOW), Fore.YELLOW)
                         input("[PULSA INTRO PARA CONTINUAR]")
+            else:
+                full_error_output = f"{error_message}Respuesta completa del Detective: {detective_response}"
+                print_color(get_bubble_ascii(f"El Detective no formuló una pregunta o solución válida o el formato JSON es incorrecto. {full_error_output}", "Sistema", Fore.RED), Fore.RED)
+                break
 
     except Exception as e:
         print_color(get_bubble_ascii(f"Ocurrió un error durante el juego: {e}", "Sistema", Fore.RED), Fore.RED)
