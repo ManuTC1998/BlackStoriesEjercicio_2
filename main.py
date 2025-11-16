@@ -136,7 +136,7 @@ def main():
             }
             ```
             Asegúrate de que tu respuesta contenga ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre.
-        3.  Regla de Respuesta: Solo puedes responder ESTRICTAMENTE con una de estas tres palabras: 'Sí', 'No', o 'Irrelevante'.
+        3.  Regla de Respuesta a Preguntas: Cuando el Detective haga una pregunta, DEBES responder ESTRICTAMENTE con una de estas tres palabras: 'Sí', 'No', o 'Irrelevante'. NO generes texto adicional, explicaciones, ni JSON. Solo la palabra clave.
         4.  No uses emojis ni texto que no sea Castellano (excepto términos técnicos).
         5.  No uses usted.
         6.  No uses español neutro o latino americano.
@@ -262,30 +262,45 @@ def main():
             # Primero, intentar extraer el bloque JSON de la pregunta
             json_block_start = detective_response.find("```json")
             json_block_end = detective_response.rfind("```")
+            
+            json_content_to_parse = ""
+            reasoning_end_index = len(detective_response) # Por defecto, si no hay bloque JSON
 
             if json_block_start != -1 and json_block_end != -1 and json_block_start < json_block_end:
-                json_content = detective_response[json_block_start + len("```json"):json_block_end].strip()
-                try:
-                    parsed_question_json = json.loads(json_content)
-                except json.JSONDecodeError as e:
-                    error_message = f"Error al parsear JSON en bloque Markdown: {e}. "
+                json_content_to_parse = detective_response[json_block_start + len("```json"):json_block_end].strip()
+                reasoning_end_index = json_block_start
             else:
-                error_message = "No se encontró un bloque JSON de pregunta válido. "
+                # Si no se encontró un bloque Markdown completo, intentar extraer buscando { y }
+                json_start = detective_response.find("{")
+                json_end = detective_response.rfind("}")
 
-            if parsed_question_json:
-                question = parsed_question_json.get("PREGUNTA", "").strip()
-                
-                # Extraer el razonamiento de la parte anterior al bloque JSON
-                reasoning_start_tag = "RAZONAMIENTO:"
-                reasoning_end_index = json_block_start if json_block_start != -1 else len(detective_response)
-                
-                reasoning_text_potential = detective_response[:reasoning_end_index].strip()
-                
-                reasoning_start_index = reasoning_text_potential.find(reasoning_start_tag)
-                if reasoning_start_index != -1:
-                    reasoning = reasoning_text_potential[reasoning_start_index + len(reasoning_start_tag):].strip()
+                if json_start != -1 and json_end != -1 and json_start < json_end:
+                    json_content_to_parse = detective_response[json_start : json_end + 1].strip()
+                    reasoning_end_index = json_start
                 else:
-                    reasoning = "No se encontró el razonamiento explícito." # O dejarlo vacío si se prefiere
+                    error_message = "No se encontró un bloque JSON de pregunta válido. "
+            
+            try:
+                if json_content_to_parse:
+                    parsed_question_json = json.loads(json_content_to_parse)
+                    question = parsed_question_json.get("PREGUNTA", "").strip()
+                else:
+                    parsed_question_json = None
+                    question = ""
+            except json.JSONDecodeError as e:
+                error_message += f"Error al parsear JSON: {e}. Contenido: '{json_content_to_parse}'"
+                parsed_question_json = None
+                question = ""
+
+            # Extraer el razonamiento de la parte anterior al bloque JSON
+            reasoning_start_tag = "RAZONAMIENTO:"
+            reasoning_text_potential = detective_response[:reasoning_end_index].strip()
+            
+            reasoning_start_index = reasoning_text_potential.find(reasoning_start_tag)
+            if reasoning_start_index != -1:
+                reasoning = reasoning_text_potential[reasoning_start_index + len(reasoning_start_tag):].strip()
+            else:
+                reasoning = "No se encontró el razonamiento explícito." # O dejarlo vacío si se prefiere
 
             if not question:
                 full_error_output = f"{error_message}Respuesta completa del Detective: {detective_response}"
