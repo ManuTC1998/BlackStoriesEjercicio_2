@@ -152,6 +152,7 @@ def main():
             Debe guiar la evaluación de tu hipótesis actual y la formulación de la siguiente pregunta para mejorar la calidad de tus deducciones.
             Formato de salida para la pregunta (CRÍTICO: DEBE incluir "PREGUNTA"):
             Tu respuesta DEBE comenzar con tu razonamiento interno, seguido por el bloque JSON.
+            Es ABSOLUTAMENTE CRÍTICO que la salida sea EXACTAMENTE un bloque de código JSON con la clave "PREGUNTA", precedido por el razonamiento.
             Ejemplo:
             RAZONAMIENTO: [Tu razonamiento interno aquí, NO VISIBLE EN TERMINAL]
             ```json
@@ -246,6 +247,10 @@ def main():
             if conversation_history:
                 detective_prompt += "Preguntas anteriores y respuestas:\n" + "\n".join(conversation_history)
             detective_prompt += "\nFormula tu siguiente pregunta de Sí/No."
+
+            if detective_model.name == "gemma3:270m":
+                print_color(get_bubble_ascii("Advertencia: El modelo 'gemma3:270m' es muy pequeño y puede tener dificultades para generar preguntas en el formato JSON requerido. Se recomienda usar un modelo más grande.", "Sistema", Fore.YELLOW), Fore.YELLOW)
+                input("[PULSA INTRO PARA CONTINUAR]")
 
             detective_response = detective_model.generate(detective_prompt)
             
