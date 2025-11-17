@@ -216,7 +216,7 @@ def main():
     # --- Generación de la Historia por el Juez ---
     print_color("Juez, por favor, crea una Black Story.", Fore.CYAN)
     
-    judge_story_prompt = JUDGE_SYSTEM_PROMPT + "\n\nCrea una nueva Black Story de complejidad media/alta."
+    judge_story_prompt = JUDGE_SYSTEM_PROMPT + "\n\nCrea una nueva Black Story de complejidad baja/media."
     
     try:
         story_response = loading_animation("Juez creando la historia...", juez_model.generate, judge_story_prompt)
