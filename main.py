@@ -8,6 +8,8 @@ import google.generativeai as genai
 import ollama
 import re # Importar el módulo re para expresiones regulares
 import time
+import threading
+import sys
 
 # Inicializar colorama
 init(autoreset=True)
@@ -90,6 +92,30 @@ def print_color(text, color):
     """Imprime texto en un color específico."""
     print(color + text + Style.RESET_ALL)
 
+def loading_animation(message, func, *args, **kwargs):
+    """Muestra una animación de carga mientras se ejecuta una función."""
+    done = False
+    def animate():
+        for c in itertools.cycle(['|', '/', '-', '\\']):
+            if done:
+                break
+            sys.stdout.write(f'\r{message} {c}')
+            sys.stdout.flush()
+            time.sleep(0.1)
+        sys.stdout.write('\r' + ' ' * (len(message) + 3) + '\r') # Limpiar la línea
+        sys.stdout.flush()
+
+    import itertools # Importar itertools aquí para que esté dentro del scope de la función si es necesario, o al principio del archivo.
+    t = threading.Thread(target=animate)
+    t.start()
+    
+    try:
+        result = func(*args, **kwargs)
+    finally:
+        done = True
+        t.join()
+    return result
+
 # --- Carga de Variables de Entorno ---
 load_dotenv()
 GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
@@ -112,8 +138,8 @@ def main():
     print_color(f"Detective (IA 2) usará: {args.m2}", Fore.RED)
 
     try:
-        juez_model = load_model(args.m1, GEMINI_API_KEY, OLLAMA_BASE_URL)
-        detective_model = load_model(args.m2, GEMINI_API_KEY, OLLAMA_BASE_URL)
+        juez_model = loading_animation(f"Cargando modelo Juez ({args.m1})...", load_model, args.m1, GEMINI_API_KEY, OLLAMA_BASE_URL)
+        detective_model = loading_animation(f"Cargando modelo Detective ({args.m2})...", load_model, args.m2, GEMINI_API_KEY, OLLAMA_BASE_URL)
     except ValueError as e:
         print_color(get_bubble_ascii(f"Error al cargar modelos: {e}", "Sistema", Fore.RED), Fore.RED)
         return
@@ -193,7 +219,7 @@ def main():
     judge_story_prompt = JUDGE_SYSTEM_PROMPT + "\n\nCrea una nueva Black Story de complejidad media/alta."
     
     try:
-        story_response = juez_model.generate(judge_story_prompt)
+        story_response = loading_animation("Juez creando la historia...", juez_model.generate, judge_story_prompt)
         
         story_short = ""
         story_long = ""
@@ -242,10 +268,15 @@ def main():
         # Guardar historia larga y solución
         timestamp = datetime.now().strftime("%d-%m-%Y %H-%M")
         filename = os.path.join(PROMPTS_DIR, f"{timestamp}.txt")
+        def log_to_file(filepath, message):
+            with open(filepath, "a", encoding="utf-8") as f:
+                f.write(message + "\n")
+
         with open(filename, "w", encoding="utf-8") as f:
-            f.write(f"--- Historia Larga ---\n{story_long}\n\n--- Solución ---\n{solution}\n")
+            f.write(f"--- Historia Larga ---\n{story_long}\n\n--- Solución ---\n{solution}\n\n--- Interacción ---\n")
         
         print_color(get_bubble_ascii(f"Historia y solución guardadas en {filename}", "Sistema", Fore.CYAN), Fore.CYAN)
+        log_to_file(filename, f"Historia: {story_short}")
 
         # Mostrar historia larga en la terminal
         print_color(f"\n[Registro de Historia Larga]\n[{datetime.now().strftime('%Y-%m-%d %H:%M')}]\n{story_long}\n---", Fore.CYAN)
@@ -261,9 +292,12 @@ def main():
         while True:
             turn_count += 1
             print_color(f"\n--- Turno {turn_count} ---", Fore.CYAN)
+            log_to_file(filename, f"\n--- Turno {turn_count} ---")
 
             if turn_count > 10:
-                print_color(get_bubble_ascii(f"Se ha alcanzado el límite de 10 turnos. El Detective no ha resuelto el misterio. La solución era: {solution}", "Sistema", Fore.MAGENTA), Fore.MAGENTA)
+                system_message = f"Se ha alcanzado el límite de 10 turnos. El Detective no ha resuelto el misterio. La solución era: {solution}"
+                print_color(get_bubble_ascii(system_message, "Sistema", Fore.MAGENTA), Fore.MAGENTA)
+                log_to_file(filename, f"Sistema: {system_message}")
                 break
 
             # Forzar al Detective a intentar una solución en el turno 10 si no lo ha hecho antes
@@ -336,6 +370,7 @@ def main():
 
             if question:
                 print_color(get_bubble_ascii(question, f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
+                log_to_file(filename, f"Detective: {question}")
                 input("[PULSA INTRO PARA CONTINUAR]")
 
                 # Juez responde a la pregunta
@@ -343,10 +378,13 @@ def main():
                 judge_answer = juez_model.generate(judge_answer_prompt).strip()
 
                 if judge_answer not in ["Sí", "No", "Irrelevante"]:
-                    print_color(get_bubble_ascii(f"El Juez dio una respuesta inválida: '{judge_answer}'. Fin del juego.", "Sistema", Fore.RED), Fore.RED)
+                    system_message = f"El Juez dio una respuesta inválida: '{judge_answer}'. Fin del juego."
+                    print_color(get_bubble_ascii(system_message, "Sistema", Fore.RED), Fore.RED)
+                    log_to_file(filename, f"Sistema: {system_message}")
                     break
 
                 print_color(get_bubble_ascii(judge_answer, f"Juez ({juez_model.name})", Fore.GREEN), Fore.GREEN)
+                log_to_file(filename, f"Juez: {judge_answer}")
                 input("[PULSA INTRO PARA CONTINUAR]")
 
                 # Añadir al historial de conversación
@@ -355,26 +393,39 @@ def main():
 
             elif solution_attempt_text:
                 print_color(get_bubble_ascii(f"Intento de solución: {solution_attempt_text}", f"Detective ({detective_model.name})", Fore.RED), Fore.RED)
+                log_to_file(filename, f"Detective (Intento de solución): {solution_attempt_text}")
                 input("[PULSA INTRO PARA CONTINUAR]")
                 
                 # Comparar solución
                 if compare_solutions_flexible(solution_attempt_text, solution):
                     if turn_count == 10:
-                        print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio en el turno 10! Fin del juego.", "Sistema", Fore.YELLOW), Fore.YELLOW) # Dorado
+                        system_message = "¡El Detective ha resuelto el misterio en el turno 10! Fin del juego."
+                        print_color(get_bubble_ascii(system_message, "Sistema", Fore.YELLOW), Fore.YELLOW) # Dorado
+                        log_to_file(filename, f"Sistema: {system_message}")
                     else:
-                        print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
+                        system_message = "¡El Detective ha resuelto el misterio! Fin del juego."
+                        print_color(get_bubble_ascii(system_message, "Sistema", Fore.GREEN), Fore.GREEN)
+                        log_to_file(filename, f"Sistema: {system_message}")
                     break
                 else:
-                    print_color(get_bubble_ascii("El Detective no ha acertado la solución.", "Sistema", Fore.YELLOW), Fore.YELLOW)
+                    system_message = "El Detective no ha acertado la solución."
+                    print_color(get_bubble_ascii(system_message, "Sistema", Fore.YELLOW), Fore.YELLOW)
+                    log_to_file(filename, f"Sistema: {system_message}")
                     if turn_count == 10:
-                        print_color(get_bubble_ascii(f"El Detective no acertó en el turno 10. Fin de la partida. La solución era: {solution}", "Sistema", Fore.MAGENTA), Fore.MAGENTA)
+                        system_message = f"El Detective no acertó en el turno 10. Fin de la partida. La solución era: {solution}"
+                        print_color(get_bubble_ascii(system_message, "Sistema", Fore.MAGENTA), Fore.MAGENTA)
+                        log_to_file(filename, f"Sistema: {system_message}")
                         break
                     else:
-                        print_color(get_bubble_ascii("Continúa el juego.", "Sistema", Fore.YELLOW), Fore.YELLOW)
+                        system_message = "Continúa el juego."
+                        print_color(get_bubble_ascii(system_message, "Sistema", Fore.YELLOW), Fore.YELLOW)
+                        log_to_file(filename, f"Sistema: {system_message}")
                         input("[PULSA INTRO PARA CONTINUAR]")
             else:
                 full_error_output = f"{error_message}Respuesta completa del Detective: {detective_response}"
-                print_color(get_bubble_ascii(f"El Detective no formuló una pregunta o solución válida o el formato JSON es incorrecto. {full_error_output}", "Sistema", Fore.RED), Fore.RED)
+                system_message = f"El Detective no formuló una pregunta o solución válida o el formato JSON es incorrecto. {full_error_output}"
+                print_color(get_bubble_ascii(system_message, "Sistema", Fore.RED), Fore.RED)
+                log_to_file(filename, f"Sistema: {system_message}")
                 break
 
     except Exception as e:
