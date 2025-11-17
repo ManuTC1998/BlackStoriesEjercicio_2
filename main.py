@@ -96,7 +96,7 @@ GEMINI_API_KEY = os.getenv("GEMINI_API_KEY")
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 # --- Configuración de la Carpeta de Prompts ---
-PROMPTS_DIR = "prompts"
+PROMPTS_DIR = "stories"
 os.makedirs(PROMPTS_DIR, exist_ok=True)
 
 # --- Lógica Principal del Juego ---
@@ -126,7 +126,7 @@ def main():
         Restricciones CRÍTICAS:
         1.  Idioma de Salida: SIEMPRE en Castellano.
         2.  Creación de Historia: Genera una versión CORTA (para el diálogo), una versión LARGA (para el registro) y la SOLUCIÓN SECRETA.
-            La historia debe ser de COMPLEJIDAD MEDIA/ALTA, requiriendo 5-7 preguntas clave para deducir la solución.
+            La historia debe ser de COMPLEJIDAD BAJA/MEDIA, requiriendo 2-3 preguntas clave para deducir la solución.
             Evita soluciones obvias o basadas en un único hecho.
             Formato de salida para la creación de historia:
             ```json
@@ -137,7 +137,7 @@ def main():
             }
             ```
             Asegúrate de que tu respuesta contenga ÚNICAMENTE el bloque de código JSON con el formato especificado, sin texto introductorio ni de cierre.
-        3.  Regla de Respuesta a Preguntas: Cuando el Detective haga una pregunta, DEBES responder ESTRICTAMENTE con una de estas tres palabras: 'Sí', 'No', o 'Irrelevante'. NO generes texto adicional, explicaciones, ni JSON. Solo la palabra clave.
+        3.  Regla de Respuesta a Preguntas: Cuando el Detective haga una pregunta, DEBES responder ESTRICTAMENTE con una de estas tres palabras: 'Sí', 'No', o 'Irrelevante'. Tu respuesta DEBE basarse ÚNICAMENTE en la 'Historia Larga' y la 'Solución' que te han sido proporcionadas. NO generes texto adicional, explicaciones, ni JSON. Solo la palabra clave.
         4.  No uses emojis ni texto que no sea Castellano (excepto términos técnicos).
         5.  No uses usted.
         6.  No uses español neutro o latino americano.
@@ -148,7 +148,7 @@ def main():
         Restricciones CRÍTICAS:
         1.  Idioma de Salida: SIEMPRE en Castellano.
         2.  Restricción de Conocimiento: NO conoces el misterio ni la solución.
-        3.  Estrategia: Solo puedes formular preguntas de respuesta cerrada (Sí/No).
+        3.  Estrategia: Solo puedes formular preguntas de respuesta cerrada (Sí/No). Tus preguntas deben estar directamente relacionadas con los detalles presentados en la 'Historia'.
         4.  Razonamiento Interno: Antes de cada pregunta, realiza un paso de 'Razonamiento' interno. Este razonamiento NO se muestra en la terminal.
             Debe guiar la evaluación de tu hipótesis actual y la formulación de la siguiente pregunta para mejorar la calidad de tus deducciones.
             Formato de salida para la pregunta (CRÍTICO: DEBE incluir "PREGUNTA"):
@@ -266,11 +266,17 @@ def main():
                 print_color(get_bubble_ascii(f"Se ha alcanzado el límite de 10 turnos. El Detective no ha resuelto el misterio. La solución era: {solution}", "Sistema", Fore.MAGENTA), Fore.MAGENTA)
                 break
 
+            # Forzar al Detective a intentar una solución en el turno 10 si no lo ha hecho antes
+            force_solution_attempt = (turn_count == 10)
+
             # Detective formula una pregunta o intenta una solución
             detective_prompt = DETECTIVE_SYSTEM_PROMPT + f"\n\nHistoria: {story_short}\n"
             if conversation_history:
                 detective_prompt += "Historial de conversación:\n" + "\n".join(conversation_history)
-            detective_prompt += f"\nTurno actual: {turn_count}. Tienes hasta el turno 10 para resolver el misterio. ¿Qué quieres hacer?"
+            detective_prompt += f"\nTurno actual: {turn_count}. Tienes hasta el turno 10 para resolver el misterio."
+            if force_solution_attempt:
+                detective_prompt += " DEBES intentar una solución en este turno."
+            detective_prompt += "¿Qué quieres hacer?"
 
             if detective_model.name == "gemma3:270m":
                 print_color(get_bubble_ascii("Advertencia: El modelo 'gemma3:270m' es muy pequeño y puede tener dificultades para generar preguntas/soluciones en el formato JSON requerido. Se recomienda usar un modelo más grande.", "Sistema", Fore.YELLOW), Fore.YELLOW)
@@ -353,7 +359,10 @@ def main():
                 
                 # Comparar solución
                 if compare_solutions_flexible(solution_attempt_text, solution):
-                    print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
+                    if turn_count == 10:
+                        print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio en el turno 10! Fin del juego.", "Sistema", Fore.YELLOW), Fore.YELLOW) # Dorado
+                    else:
+                        print_color(get_bubble_ascii("¡El Detective ha resuelto el misterio! Fin del juego.", "Sistema", Fore.GREEN), Fore.GREEN)
                     break
                 else:
                     print_color(get_bubble_ascii("El Detective no ha acertado la solución.", "Sistema", Fore.YELLOW), Fore.YELLOW)
